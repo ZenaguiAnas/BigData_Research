@@ -1,5 +1,5 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, explode, count, year, month, when
+from pyspark.sql.functions import col, explode, count, array_contains
 from fastapi import FastAPI, Query, HTTPException
 from typing import List, Optional
 import json
@@ -20,8 +20,6 @@ app.add_middleware(
 # SparkSession initialization with updated MongoDB configuration
 spark = SparkSession.builder \
         .config("spark.jars.packages", "org.mongodb.spark:mongo-spark-connector_2.12:3.0.1") \
-        .config("spark.driver.memory", "40g") \
-        .config("spark.executor.memory", "50g") \
         .appName("My App") \
         .getOrCreate()
 
@@ -116,45 +114,36 @@ async def get_countries():
   
 @app.get("/api/articles/{country}")
 async def get_articles_by_country(country: str):
-    # Explode countries and filter by the provided country
-    query = df.select(explode(col("countries")).alias("country"))
-    
-    # Filter the exploded data for the specific country
-    query = query.filter(col("country") == country)
-    
-    # Group by year and quartile, then count the articles in each quartile
-    result = query.groupBy("year", "quartile") \
-                  .count() \
-                  .filter(col("quartile").isNotNull()) \
-                  .orderBy("year", "quartile")
-    
-    # Collect the results and return them
-    result = result.collect()
+    try:
+        # Filter articles for the given country
+        articles_by_country = df.filter(array_contains(col("countries"), country))
 
-    # Prepare the final response
-    response = []
-    for row in result:
-        year = row["year"]
-        quartile = row["quartile"]
-        count = row["count"]
-        
-        # Initialize the dictionary if not already present
-        year_data = next((item for item in response if item["year"] == year), None)
-        if not year_data:
-            year_data = {"year": year, "Q1": 0, "Q2": 0, "Q3": 0, "Q4": 0}
-            response.append(year_data)
-        
-        # Assign the count to the corresponding quartile
-        if quartile == "Q1":
-            year_data["Q1"] = count
-        elif quartile == "Q2":
-            year_data["Q2"] = count
-        elif quartile == "Q3":
-            year_data["Q3"] = count
-        elif quartile == "Q4":
-            year_data["Q4"] = count
+        # Group by year and pivot the 'quartile' column for Q1, Q2, Q3, Q4 counts
+        articles_by_year_and_quartile = articles_by_country.groupBy("year") \
+            .pivot("quartile", ["Q1", "Q2", "Q3", "Q4"]) \
+            .agg(count("*").alias("count"))
 
-    return response
+        # Replace nulls with 0
+        articles_by_year_and_quartile = articles_by_year_and_quartile.na.fill(0)
+
+        # Convert to JSON format
+        json_result = articles_by_year_and_quartile.toJSON().collect()
+        result_list = [json.loads(row) for row in json_result]
+
+        # Sort the results by year in descending order
+        sorted_result = sorted(result_list, key=lambda x: x['year'], reverse=True)
+
+        # Add missing keys with 0 if not present
+        for item in sorted_result:
+            item.setdefault("Q1", 0)
+            item.setdefault("Q2", 0)
+            item.setdefault("Q3", 0)
+            item.setdefault("Q4", 0)
+
+        return sorted_result
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 
 
@@ -175,3 +164,20 @@ async def get_articles_per_quartile():
 
     return quartiles
 
+
+@app.get("/api/articles-per-quartile")
+async def get_articles_per_quartile():
+    try:
+        # Group by quartile and count the number of articles
+        number_of_articles_quartile = df.groupBy("quartile") \
+            .agg(count("*").alias("article")) \
+            .orderBy("article", ascending=False)
+
+        # Convert the result to JSON
+        json_result = number_of_articles_quartile.toJSON().collect()
+        result_list = [json.loads(row) for row in json_result]
+
+        return result_list
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
