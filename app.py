@@ -146,25 +146,6 @@ async def get_articles_by_country(country: str):
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 
-
-@app.get("/api/articles-per-quartile")
-async def get_articles_per_quartile():
-    # Group by quartile and count articles
-    result = df.groupBy("quartile").agg(count("*").alias("article_count")).orderBy("article_count", ascending=False)
-    
-    # Format the result into a structured response
-    quartiles = {}
-    for row in result.collect():
-        quartiles[row["quartile"]] = row["article_count"]
-    
-    # Ensure all quartiles are included, even if no data
-    for quartile in ["Q1", "Q2", "Q3", "Q4"]:
-        if quartile not in quartiles:
-            quartiles[quartile] = 0
-
-    return quartiles
-
-
 @app.get("/api/articles-per-quartile")
 async def get_articles_per_quartile():
     try:
