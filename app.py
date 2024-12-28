@@ -144,6 +144,49 @@ async def get_articles_by_country(country: str):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+    
+@app.get("/api/articles/count-by-month-and-country/")
+async def count_articles_by_month_and_country(year: str, country: str):
+    try:
+        # Filter articles by year and check if the country exists in the 'countries' array
+        filtered_articles = df.filter((col("year") == year) & (array_contains(col("countries"), country)))
+
+        # Group by month and count the number of articles
+        articles_by_month = (
+            filtered_articles.groupBy("month")
+            .agg(count("*").alias("article_count"))
+            .orderBy("month")
+        )
+
+        # Convert to JSON format
+        json_result = articles_by_month.toJSON().collect()
+        result_list = [json.loads(row) for row in json_result]
+
+        return result_list
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+
+
+
+@app.get("/api/articles/count-by-month-and-year/{year}")
+async def count_articles_by_month_and_year(year: str):
+    try:
+        # Filter articles for the given year
+        articles_by_year = df.filter(col("year") == year)
+
+        # Group by month and count the number of articles
+        articles_by_month = articles_by_year.groupBy("month").agg(count("*").alias("article_count")).orderBy("month")
+
+        # Convert to JSON format
+        json_result = articles_by_month.toJSON().collect()
+        result_list = [json.loads(row) for row in json_result]
+
+        return result_list
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 
 @app.get("/api/articles-per-quartile")

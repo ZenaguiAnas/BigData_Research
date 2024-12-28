@@ -13,32 +13,42 @@ import {
 } from "chart.js";
 import { Bar } from "react-chartjs-2";
 
-// Register Chart.js components
-ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
+// Register necessary Chart.js components
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  Title,
+  Tooltip,
+  Legend
+);
 
 interface FilterOptions {
   year: string;
-  month: string;
   country: string;
 }
 
 interface ChartDataType {
   year: string;
-  month: string;
   Q1: number;
   Q2: number;
   Q3: number;
   Q4: number;
 }
 
+interface MonthlyChartData {
+  month: string;
+  article_count: number;
+}
+
 export default function FilteredArticlesView() {
   const [filters, setFilters] = useState<FilterOptions>({
     year: "all",
-    month: "all",
     country: "all",
   });
   const [countries, setCountries] = useState<string[]>([]);
   const [chartData, setChartData] = useState<ChartDataType[]>([]);
+  const [monthlyChartData, setMonthlyChartData] = useState<MonthlyChartData[]>([]);
 
   // Fetch list of countries on component mount
   useEffect(() => {
@@ -53,32 +63,67 @@ export default function FilteredArticlesView() {
     fetchCountries();
   }, []);
 
-  // Fetch chart data based on filters
+  // Fetch chart data dynamically based on filters
   useEffect(() => {
     async function fetchChartData() {
       try {
         let url = "http://localhost:8000/api/articles";
-        const queryParams = new URLSearchParams();
+        const queryParams = [];
 
-        if (filters.year !== "all") queryParams.append("year", filters.year);
-        if (filters.month !== "all") queryParams.append("month", filters.month);
-        if (filters.country !== "all") queryParams.append("country", filters.country);
+        if (filters.year !== "all") queryParams.push(`year=${filters.year}`);
+        if (filters.country !== "all")
+          url = `http://localhost:8000/api/articles/${filters.country}`;
 
-        // Final URL with dynamic query parameters
-        const finalUrl = `${url}?${queryParams.toString()}`;
-        const response = await axios.get(finalUrl);
+        const queryString = queryParams.length
+          ? `?${queryParams.join("&")}`
+          : "";
+        const response = await axios.get(`${url}${queryString}`);
         setChartData(response.data);
       } catch (error) {
         console.error("Error fetching chart data:", error);
       }
     }
-
     fetchChartData();
   }, [filters]);
 
-  // Transform data for the chart
+  // Fetch monthly data based on filters
+  useEffect(() => {
+    async function fetchMonthlyChartData() {
+      if (filters.year !== "all" && filters.country !== "all") {
+        try {
+          const response = await axios.get(
+            `http://localhost:8000/api/articles/count-by-month-and-country/`,
+            { params: { year: filters.year, country: filters.country } }
+          );
+          setMonthlyChartData(response.data);
+        } catch (error) {
+          console.error("Error fetching monthly data:", error);
+        }
+      }
+    }
+    fetchMonthlyChartData();
+  }, [filters]);
+
+  // Fetch monthly data when year changes
+  useEffect(() => {
+    async function fetchMonthlyChartDataByYear() {
+      if (filters.year !== "all") {
+        try {
+          const response = await axios.get(
+            `http://localhost:8000/api/articles/count-by-month-and-year/${filters.year}`
+          );
+          setMonthlyChartData(response.data);
+        } catch (error) {
+          console.error("Error fetching monthly data by year:", error);
+        }
+      }
+    }
+    fetchMonthlyChartDataByYear();
+  }, [filters.year]);
+
+  // Transform data for the first chart
   const getChartConfig = () => {
-    const labels = chartData.map((item) => `${item.year} - Month ${item.month}`);
+    const labels = chartData.map((item) => item.year);
     const Q1Data = chartData.map((item) => item.Q1);
     const Q2Data = chartData.map((item) => item.Q2);
     const Q3Data = chartData.map((item) => item.Q3);
@@ -87,31 +132,27 @@ export default function FilteredArticlesView() {
     return {
       labels,
       datasets: [
-        {
-          label: "Q1",
-          data: Q1Data,
-          backgroundColor: "rgba(75, 192, 192, 0.6)",
-        },
-        {
-          label: "Q2",
-          data: Q2Data,
-          backgroundColor: "rgba(54, 162, 235, 0.6)",
-        },
-        {
-          label: "Q3",
-          data: Q3Data,
-          backgroundColor: "rgba(255, 206, 86, 0.6)",
-        },
-        {
-          label: "Q4",
-          data: Q4Data,
-          backgroundColor: "rgba(255, 99, 132, 0.6)",
-        },
+        { label: "Q1", data: Q1Data, backgroundColor: "rgba(75, 192, 192, 0.6)" },
+        { label: "Q2", data: Q2Data, backgroundColor: "rgba(54, 162, 235, 0.6)" },
+        { label: "Q3", data: Q3Data, backgroundColor: "rgba(255, 206, 86, 0.6)" },
+        { label: "Q4", data: Q4Data, backgroundColor: "rgba(255, 99, 132, 0.6)" },
       ],
     };
   };
 
-  // Update filter state
+  // Transform data for the second chart
+  const getMonthlyChartConfig = () => {
+    const labels = monthlyChartData.map((item) => item.month);
+    const data = monthlyChartData.map((item) => item.article_count);
+
+    return {
+      labels,
+      datasets: [
+        { label: "Articles by Month", data, backgroundColor: "rgba(255, 159, 64, 0.6)" },
+      ],
+    };
+  };
+
   const handleFilterChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFilters((prev) => ({ ...prev, [name]: value }));
@@ -119,8 +160,8 @@ export default function FilteredArticlesView() {
 
   return (
     <div className="space-y-6 p-6 bg-gray-100 rounded-lg">
-      {/* Filters */}
       <div className="grid gap-4 lg:grid-cols-3">
+        {/* Year Filter */}
         <div className="flex flex-col space-y-2">
           <label className="text-sm font-semibold">Select Year</label>
           <select
@@ -136,24 +177,7 @@ export default function FilteredArticlesView() {
             <option value="2020">2020</option>
           </select>
         </div>
-
-        <div className="flex flex-col space-y-2">
-          <label className="text-sm font-semibold">Select Month</label>
-          <select
-            name="month"
-            value={filters.month}
-            onChange={handleFilterChange}
-            className="p-2 border rounded"
-          >
-            <option value="all">All</option>
-            {[...Array(12)].map((_, index) => (
-              <option key={index + 1} value={(index + 1).toString()}>
-                {`Month ${index + 1}`}
-              </option>
-            ))}
-          </select>
-        </div>
-
+        {/* Country Filter */}
         <div className="flex flex-col space-y-2">
           <label className="text-sm font-semibold">Select Country</label>
           <select
@@ -172,7 +196,7 @@ export default function FilteredArticlesView() {
         </div>
       </div>
 
-      {/* Chart */}
+      {/* Quarterly Chart */}
       <div className="space-y-6">
         <div className="bg-white p-4 rounded-lg shadow-md">
           <h2 className="text-lg font-bold mb-4">Articles Distribution</h2>
@@ -181,9 +205,20 @@ export default function FilteredArticlesView() {
             options={{
               responsive: true,
               plugins: { legend: { position: "top" } },
-              scales: {
-                y: { beginAtZero: true },
-              },
+            }}
+          />
+        </div>
+      </div>
+
+      {/* Monthly Chart */}
+      <div className="space-y-6">
+        <div className="bg-white p-4 rounded-lg shadow-md">
+          <h2 className="text-lg font-bold mb-4">Monthly Articles in {filters.year}</h2>
+          <Bar
+            data={getMonthlyChartConfig()}
+            options={{
+              responsive: true,
+              plugins: { legend: { position: "top" } },
             }}
           />
         </div>
